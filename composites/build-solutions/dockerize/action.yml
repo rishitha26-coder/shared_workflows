@@ -1,0 +1,89 @@
+name: 'Service Solution - Dockerize'
+description: 'A composite action to dockerize and the services inside a solution'
+
+
+inputs:
+  service-path:
+    description: 'Primary service path'
+    required: false
+  service-name:
+    description: 'Primary service name'
+    required: true
+  dockerhub_repo:
+    description: 'docker Hub Repo name'
+    required: true
+  # version-tag:
+  #   description: 'Artifact version'
+  #   required: false
+  #   default: '1.0.0'
+  dockerhub_username:
+    required: true
+    description: 'docker Hub Repo login username'
+  dockerhub_password:
+    required: true
+    description: 'docker Hub Repo login password'
+  # ec2_user:
+  #   description: 'EC2 instance username'
+  #   required: true
+  # ec2_host:
+  #   description: 'EC2 instance host'
+  #   required: true
+  # ec2_ssh_key:
+  #   description: 'EC2 SSH key secret name'
+  #   required: true
+  # compose_file_path:
+  #   description: 'Path to Docker Compose file on EC2'
+  #   required: true
+  # compose_directory:
+  #   description: 'Directory containing Docker Compose file on EC2'
+  #   required: true
+
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/checkout@v4
+
+    - name: check directory
+      run: |
+        ls -lh 
+      shell: bash
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ inputs.dockerhub_username }}
+        password: ${{ inputs.dockerhub_password }}
+
+    - name: Build, Tag, and Push Docker image to Docker Hub
+      env:
+        DOCKERHUB_USERNAME: ${{ inputs.dockerhub_username }}
+        DOCKERHUB_REPOSITORY: ${{ inputs.dockerhub_repo }}
+        SERVICE_NAME: ${{ inputs.service-name }}
+        SERVICE_PATH: ${{ inputs.service-path }}
+        VERSION_TAG: ${{ inputs.version-tag }}
+      run: |
+        SHORT_SHA=$(echo $GITHUB_SHA | cut -c1-6)
+        docker build -t ${{ env.SERVICE_NAME }} ${{ env.SERVICE_PATH }}
+        docker tag ${{ env.SERVICE_NAME }}:latest ${{ env.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_REPOSITORY }}:$SHORT_SHA
+        docker push ${{ env.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_REPOSITORY }}:$SHORT_SHA
+      shell: bash
+
+    # - name: Add SSH key
+    #   uses: webfactory/ssh-agent@v0.5.3
+    #   with:
+    #     ssh-private-key: ${{ secrets[inputs.ec2_ssh_key] }}
+
+    # - name: Deploy Docker Compose on EC2
+    #   run: |
+    #     SHORT_SHA=$(echo $GITHUB_SHA | cut -c1-6)
+    #     ssh -o StrictHostKeyChecking=no ${{ inputs.ec2_user }}@${{ inputs.ec2_host }} << EOF
+    #       cd ${{ inputs.compose_directory }}
+    #       sed -i 's|image: .*bakery-app|image: ${{ inputs.dockerhub_username }}/${{ inputs.dockerhub_repo }}:$SHORT_SHA|' ${{ inputs.compose_file_path }}
+    #       docker-compose pull
+    #       docker-compose up -d
+    #     EOF
+    #   shell: bash

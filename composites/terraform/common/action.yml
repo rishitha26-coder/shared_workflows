@@ -1,0 +1,134 @@
+name: "Terraform"
+description: "A composite action to run terraform commands"
+inputs:
+  github-ref:
+    description: "The github ref"
+    required: true
+  role-to-assume:
+    description: "The role to assume from the GH OIDC. Most callers will default and will NOT override."
+    required: false
+    # Defaults to DevOps Production iac-service-role
+    default: arn:aws:iam::925629556500:role/iac-service-role
+  tf-dir:
+    description: "The directory where the terraform files are located"
+    required: false
+  tf-workspace-env:
+    description: "terraform workspace env"
+    required: true
+  tf-var-files:
+    description: "The comma delimited list of tfvars to be passed to terraform."
+    required: false
+    default: ""
+  tf-backend-config:
+    description: "The backend config to be passed to terraform"
+    required: false
+    default: ""
+  version-tag:
+    description: "The version tag of the resources to be deployed"
+    required: false
+  tf-usercreation-bucket:
+    description: "The bucket name for usercreation of the resources"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: "Checkout"
+      uses: actions/checkout@v4
+
+    # use the aws-assume composite in this repo
+    - name: configure aws credentials
+      uses: terraform-code-bagel/Shared_Workflows/composites/aws-assume@main
+      with:
+        # override the assumed role
+        role-to-assume: ${{ inputs.role-to-assume }}
+
+    - name: "Setup Terraform"
+      uses: hashicorp/setup-terraform@v3
+
+    - name: Convert to -backend-config options
+      id: convert_to_backend_config_options
+      run: |
+        BACKEND_CONFIG_OPTIONS=""
+        IFS=',' read -ra TFVAR_FILES <<< "${{ inputs.tf-backend-config }}"
+        for file in "${TFVAR_FILES[@]}"; do
+          BACKEND_CONFIG_OPTIONS+="-backend-config=$file "
+        done
+        echo "backend_config_options=$BACKEND_CONFIG_OPTIONS" >> "$GITHUB_OUTPUT"
+      shell: bash
+
+    - name: "Terraform Init"
+      run: terraform init ${{ steps.convert_to_backend_config_options.outputs.backend_config_options }}
+      # working-directory: ${{ inputs.tf-dir }}
+      shell: bash
+
+    - name: "Terraform backend file"
+      run: cat env/bagel.tfvars
+      # working-directory: ${{ inputs.tf-dir }}
+      shell: bash
+
+    - name: "Terraform Validate"
+      run: terraform validate
+      # working-directory: ${{ inputs.tf-dir }}
+      shell: bash
+
+    - name: Download notified_users.json from S3
+      run: |
+        if aws s3api head-object --bucket ${{ inputs.tf-usercreation-bucket }} --key "notified_users.json" 2>/dev/null; then
+          aws s3 cp s3://${{ inputs.tf-usercreation-bucket }}/notified_users.json ./notified_users.json
+        else
+          echo '' > ./notified_users.json
+        fi
+        ls -lrths
+      shell: bash
+
+    - name: Download created_users.json from S3
+      run: |
+        if aws s3api head-object --bucket ${{ inputs.tf-usercreation-bucket }} --key "created_users.json" 2>/dev/null; then
+          aws s3 cp s3://${{ inputs.tf-usercreation-bucket }}/created_users.json ./created_users.json
+        else
+          echo '' > ./created_users.json
+        fi
+        ls -lrths
+      shell: bash
+
+
+    - name: Convert to -var-file options
+      id: convert_to_var_file_options
+      run: |
+        VAR_FILE_OPTIONS=""
+        IFS=',' read -ra TFVAR_FILES <<< "${{ inputs.tf-var-files }}"
+        for file in "${TFVAR_FILES[@]}"; do
+          VAR_FILE_OPTIONS+="-var-file=$file "
+        done
+        echo "var_file_options=$VAR_FILE_OPTIONS" >> "$GITHUB_OUTPUT"
+      shell: bash
+
+    - name: "Terraform Plan"
+      run: terraform plan  ${{ steps.convert_to_var_file_options.outputs.var_file_options }}
+      # working-directory: ${{ inputs.tf-dir }}
+      shell: bash
+
+    - name: "Terraform Action"
+      run: |
+        if [ "${{ inputs.github-ref }}" != "refs/heads/main" ]; then
+          terraform plan  ${{ steps.convert_to_var_file_options.outputs.var_file_options }}
+        else
+          terraform apply -auto-approve ${{ steps.convert_to_var_file_options.outputs.var_file_options }}
+        fi
+      # working-directory: ${{ inputs.tf-dir }}
+      shell: bash
+
+    - name: Upload notified_users.json to S3
+      run: |
+        aws s3 cp ./notified_users.json s3://${{ inputs.tf-usercreation-bucket }}/notified_users.json
+        ls -lrths
+      shell: bash
+
+    - name: Upload created_users.json to S3
+      run: |
+        aws s3 cp ./created_users.json s3://${{ inputs.tf-usercreation-bucket }}/created_users.json
+        ls -lrths
+      shell: bash
+
+
+

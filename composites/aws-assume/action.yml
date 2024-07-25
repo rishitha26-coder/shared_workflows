@@ -1,0 +1,17 @@
+name: 'AWS Assume Role'
+description: 'A composite action to assume an AWS Role'
+
+inputs:
+  role-to-assume:
+    description: 'The AWS role to assume'
+    required: false
+    default: arn:aws:iam::925629556500:role/iac-service-role
+
+runs:
+  using: 'composite'
+  steps:
+    - name: 'configure aws credentials'
+      uses: aws-actions/configure-aws-credentials@v4.0.2
+      with:
+        role-to-assume: ${{ inputs.role-to-assume }}
+        aws-region: ap-south-1
